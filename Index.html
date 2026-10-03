@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gadget Price Finder</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#14171c;--mu:#667085;--bd:#e3e6eb;--ac:#2563eb;--ok:#15803d;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1115;--card:#181b21;--tx:#eceef2;--mu:#98a1b0;--bd:#2a2f38;--ac:#6b9bff;--ok:#4ade80}}
+:root[data-theme="dark"]{--bg:#0f1115;--card:#181b21;--tx:#eceef2;--mu:#98a1b0;--bd:#2a2f38;--ac:#6b9bff;--ok:#4ade80}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.5rem;margin:0 0 4px}
+.sub{color:var(--mu);margin:0 0 18px;font-size:.92rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+input,select,button{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:10px 12px}
+input[type=text]{flex:1;min-width:200px}
+button.go{background:var(--ac);border-color:var(--ac);color:#fff;font-weight:600;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--bd);white-space:nowrap}
+td.n{white-space:normal;color:var(--mu);font-size:.82rem}
+tr.best td:first-child{font-weight:700;color:var(--ok)}
+.mu{color:var(--mu);font-size:.85rem}
+.warn{font-size:.82rem;color:var(--mu);border-left:3px solid var(--bd);padding-left:10px;margin-top:10px}
+details summary{cursor:pointer;color:var(--mu);font-size:.9rem}
+.rates{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-top:10px}
+.rates label{font-size:.78rem;color:var(--mu);display:block}
+.rates input{width:100%;padding:6px 8px}
+a{color:var(--ac)}
+</style>
+</head>
+<body>
+<main>
+<h1>📱 Gadget Price Finder</h1>
+<p class="sub">Compare what a phone, laptop, console or other gadget costs across countries, converted to one currency.</p>
+
+<div class="card">
+  <div class="row">
+    <input type="text" id="q" placeholder="e.g. iPhone 17 Pro 256GB, PS5, Sony WH-1000XM6" aria-label="Gadget name">
+    <select id="cur" aria-label="Show prices in"></select>
+    <button class="go" id="go">Find prices</button>
+  </div>
+  <div class="warn" id="status">Prices are estimates from Claude's knowledge (not live listings). Use the shop links to confirm before buying.</div>
+</div>
+
+<div class="card" id="out" hidden>
+  <div id="title" style="font-weight:600;margin-bottom:8px"></div>
+  <div class="tw"><table>
+    <thead><tr><th>Country</th><th>Local price</th><th id="convh">Converted</th><th>Notes</th><th>Check</th></tr></thead>
+    <tbody id="tb"></tbody>
+  </table></div>
+  <div class="warn">Prices differ by tax (US prices exclude sales tax; most others include VAT/GST), storage/model variant, warranty and import duty if you buy abroad.</div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Exchange rates (per 1 USD, approximate – edit to match today's rate)</summary>
+    <div class="rates" id="rates"></div>
+  </details>
+</div>
+</main>
+<script>
+const C={US:{n:"United States",cc:"USD",gl:"US"},GB:{n:"United Kingdom",cc:"GBP",gl:"GB"},DE:{n:"Germany (EU)",cc:"EUR",gl:"DE"},IN:{n:"India",cc:"INR",gl:"IN"},AE:{n:"UAE",cc:"AED",gl:"AE"},JP:{n:"Japan",cc:"JPY",gl:"JP"},CA:{n:"Canada",cc:"CAD",gl:"CA"},AU:{n:"Australia",cc:"AUD",gl:"AU"},SG:{n:"Singapore",cc:"SGD",gl:"SG"}};
+const R={USD:1,EUR:.86,GBP:.74,INR:88,AED:3.67,JPY:150,CAD:1.37,AUD:1.5,SGD:1.3};
+const $=id=>document.getElementById(id);
+const cur=$("cur"),rt=$("rates");
+Object.keys(R).forEach(k=>{cur.add(new Option(k,k));
+  const l=document.createElement("label");l.textContent=k;
+  const i=document.createElement("input");i.type="number";i.step="any";i.value=R[k];i.disabled=k==="USD";
+  i.addEventListener("input",()=>{const v=parseFloat(i.value);if(v>0){R[k]=v;render()}});
+  l.appendChild(i);rt.appendChild(l)});
+let data=null,query="";
+const fmt=(v,c)=>{try{return new Intl.NumberFormat(undefined,{style:"currency",currency:c,maximumFractionDigits:c==="JPY"||c==="INR"?0:2}).format(v)}catch(e){return c+" "+Math.round(v)}};
+function render(){
+  if(!data)return;
+  const t=cur.value;
+  $("out").hidden=false;
+  $("title").textContent=data.product||query;
+  $("convh").textContent="In "+t;
+  const rows=(data.rows||[]).filter(r=>C[r.country]).map(r=>{
+    const cc=C[r.country].cc, p=typeof r.price==="number"&&r.price>0?r.price:null;
+    return {...r,cc,conv:p===null?null:p/R[cc]*R[t]};
+  });
+  const ok=rows.filter(r=>r.conv!==null).sort((a,b)=>a.conv-b.conv);
+  const best=ok.length?ok[0].country:null;
+  const all=ok.concat(rows.filter(r=>r.conv===null));
+  const tb=$("tb");tb.textContent="";
+  all.forEach(r=>{
+    const tr=document.createElement("tr");if(r.country===best)tr.className="best";
+    const cells=[C[r.country].n,r.conv===null?"n/a":fmt(r.price,r.cc),r.conv===null?"–":fmt(r.conv,t),(r.taxIncluded?"Incl. tax. ":"Excl. tax. ")+(r.note||"")];
+    cells.forEach((v,i)=>{const td=document.createElement("td");td.textContent=v;if(i===3)td.className="n";tr.appendChild(td)});
+    const td=document.createElement("td");const a=document.createElement("a");
+    a.href="https://www.google.com/search?tbm=shop&gl="+C[r.country].gl+"&q="+encodeURIComponent(query);
+    a.target="_blank";a.rel="noopener";a.textContent="Shops ↗";td.appendChild(a);tr.appendChild(td);
+    tb.appendChild(tr);
+  });
+}
+cur.addEventListener("change",render);
+async function find(){
+  query=$("q").value.trim();if(!query)return;
+  const st=$("status"),btn=$("go");
+  let sample=null;
+  try{sample=await claude.use("sample")}catch(e){}
+  if(!sample){st.textContent="AI lookup isn't available in this view. Open the page from claude.ai to use it.";return}
+  btn.disabled=true;st.textContent="Looking up prices…";
+  const prompt=`Estimate current retail prices for the gadget "${query}" in these countries: ${Object.entries(C).map(([k,v])=>k+" ("+v.cc+")").join(", ")}.
+Use the typical official/street retail price of the base or most common variant in each country, in that country's LOCAL currency. Set taxIncluded true if the price includes VAT/GST/sales tax (US and Canada shelf prices usually exclude it). If the product is not sold there or you are unsure, set price to null. Keep each note under 10 words (variant, or that it is a guess).
+Return ONLY JSON: {"product":"full product name","rows":[{"country":"US","price":number|null,"taxIncluded":boolean,"note":"..."}]}`;
+  try{
+    data=await sample.json(prompt);
+    st.textContent="Estimates from Claude's knowledge, not live listings. Confirm with the shop links.";
+    render();
+  }catch(e){
+    st.textContent=e&&e.code==="not_granted"?"Permission to ask Claude was declined.":"Couldn't fetch prices. Please try again in a moment.";
+  }
+  btn.disabled=false;
+}
+$("go").addEventListener("click",find);
+$("q").addEventListener("keydown",e=>{if(e.key==="Enter")find()});
+</script>
+</body>
+</html>
